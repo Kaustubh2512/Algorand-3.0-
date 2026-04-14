@@ -1,0 +1,203 @@
+import React, { useState, useEffect } from 'react';
+import { Navbar } from '../components/Navbar';
+import { useWallet } from '../context/WalletContext';
+import { useNavigate } from 'react-router-dom';
+import { Activity, Shield, Hash, ShieldAlert } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { AlertBanner } from '../components/AlertBanner';
+import SpotlightCard from '../components/SpotlightCard';
+
+export const Monitor = () => {
+  const { walletAddress } = useWallet();
+  const navigate = useNavigate();
+  
+  const [appId, setAppId] = useState('');
+  const [accountAddr, setAccountAddr] = useState('');
+  const [isMonitoring, setIsMonitoring] = useState(false);
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [showAlertBanner, setShowAlertBanner] = useState(false);
+
+  useEffect(() => {
+    if (!walletAddress) {
+      navigate('/');
+    }
+  }, [walletAddress, navigate]);
+
+  let timeoutId: any;
+  const startMonitoring = () => {
+    if (!appId || !accountAddr) return;
+    setIsMonitoring(true);
+    setAlerts([]);
+    
+    // Mock simulation
+    setTimeout(() => {
+      const newAlert = {
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'Reentrancy Attempt',
+        description: 'Multiple recursive calls detected from unexpected address.',
+        severity: 'Critical'
+      };
+      setAlerts(prev => [newAlert, ...prev]);
+      setShowAlertBanner(true);
+      
+      setTimeout(() => setShowAlertBanner(false), 5000); // hide after 5 sec
+    }, 4000);
+  };
+
+  const stopMonitoring = () => {
+    setIsMonitoring(false);
+    clearTimeout(timeoutId);
+  }
+
+  if (!walletAddress) return null;
+
+  return (
+    <div className="min-h-screen flex flex-col bg-background">
+      <Navbar />
+      
+      <AlertBanner 
+        show={showAlertBanner} 
+        message="A potential Reentrancy attack was just detected logic execution on App ID." 
+      />
+
+      <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 w-full">
+        <div className="mb-12 flex justify-between items-end">
+          <div>
+            <h1 className="text-4xl font-syne font-bold mb-2 flex items-center gap-4">
+              Live Monitoring
+              {isMonitoring && (
+                 <span className="flex items-center gap-2 text-sm bg-safe/10 border border-safe text-safe px-3 py-1 rounded-full animate-pulse shadow-[0_0_10px_rgba(0,255,136,0.5)]">
+                   <span className="w-2 h-2 rounded-full bg-safe"></span>
+                   ACTIVE
+                 </span>
+              )}
+            </h1>
+            <p className="text-gray-400">Set up 24/7 AI-powered anomaly detection for live smart contracts.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Config Card */}
+          <div className="lg:col-span-1 space-y-6">
+            <SpotlightCard spotlightColor="rgba(0, 212, 255, 0.15)">
+              <h3 className="font-syne font-bold text-xl mb-4 border-b border-border pb-2 flex items-center gap-2">
+                <Shield className="w-5 h-5 text-secondary" />
+                Target Setup
+              </h3>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-mono text-gray-400 mb-1 block">Algorand App ID:</label>
+                  <div className="relative">
+                    <Hash className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input 
+                      type="text" 
+                      value={appId}
+                      onChange={(e) => setAppId(e.target.value)}
+                      disabled={isMonitoring}
+                      className="w-full bg-background border border-border rounded-lg pl-10 pr-4 py-2 text-white focus:outline-none focus:border-secondary transition-colors font-mono disabled:opacity-50"
+                      placeholder="e.g. 1234567"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-mono text-gray-400 mb-1 block">Monitor Account (Optional):</label>
+                  <div className="relative">
+                    <Activity className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input 
+                      type="text" 
+                      value={accountAddr}
+                      onChange={(e) => setAccountAddr(e.target.value)}
+                      disabled={isMonitoring}
+                      className="w-full bg-background border border-border rounded-lg pl-10 pr-4 py-2 text-white focus:outline-none focus:border-secondary transition-colors font-mono disabled:opacity-50"
+                      placeholder="e.g. ABCDE...1234"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-4">
+                  {!isMonitoring ? (
+                    <button 
+                      onClick={startMonitoring}
+                      disabled={!appId} 
+                      className="btn-primary w-full disabled:opacity-50 !bg-secondary !text-black hover:!shadow-[0_0_20px_rgba(0,212,255,0.4)]"
+                    >
+                      Start Monitoring
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={stopMonitoring}
+                      className="w-full bg-danger/20 border border-danger text-danger font-bold py-3 px-6 rounded-lg transition-all duration-300 hover:bg-danger hover:text-white"
+                    >
+                      Stop Monitoring
+                    </button>
+                  )}
+                </div>
+              </div>
+            </SpotlightCard>
+          </div>
+
+          {/* Live Feed */}
+          <div className="lg:col-span-2">
+            <SpotlightCard className="h-full min-h-[500px] flex flex-col" spotlightColor="rgba(0, 255, 136, 0.15)">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="font-syne font-bold text-xl flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-primary" />
+                  Live Activity Feed
+                </h3>
+                {isMonitoring && (
+                  <span className="text-sm font-mono text-gray-400 flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-primary animate-ping inline-block"></span>
+                    Polling every 5s...
+                  </span>
+                )}
+              </div>
+
+              <div className="flex-grow bg-background/50 rounded-xl border border-border p-4 overflow-y-auto">
+                {!isMonitoring && alerts.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
+                    <Activity className="w-16 h-16 opacity-20" />
+                    <p className="font-mono">Monitoring is not active.</p>
+                  </div>
+                ) : alerts.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
+                    <div className="flex space-x-2">
+                      <div className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                    <p className="font-mono text-primary text-sm">Listening for transactions on App {appId}...</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {alerts.map((alert, idx) => (
+                      <motion.div 
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        key={idx}
+                        className={`p-4 rounded-lg border flex gap-4
+                          ${alert.severity === 'Critical' ? 'bg-danger/10 border-danger/50 text-danger' : 
+                            alert.severity === 'Risky' ? 'bg-warning/10 border-warning/50 text-warning' : 
+                            'bg-surface border-border text-gray-300'}`}
+                      >
+                        <ShieldAlert className="w-6 h-6 shrink-0 mt-1" />
+                        <div>
+                          <div className="flex justify-between items-start mb-1">
+                            <h4 className="font-syne font-bold text-lg">{alert.type}</h4>
+                            <span className="font-mono text-xs opacity-70">{alert.timestamp}</span>
+                          </div>
+                          <p className="text-sm opacity-90">{alert.description}</p>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </SpotlightCard>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+};

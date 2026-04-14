@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-multipart
+motor
+pymongo
+python-dotenv
+apscheduler
+requests
+aiofiles
+py-algorand-sdk
+anthropic
+scikit-learn
+joblib
+numpy
+
