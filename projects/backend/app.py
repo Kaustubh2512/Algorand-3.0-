@@ -69,12 +69,27 @@ async def analyze_smart_contract(
         vulnerabilities = analyze_lines(content)
         score, risk_level = calculate_score(vulnerabilities)
 
-        # Step 3: Map ML label to risk (ML adds confidence, rules give score)
-        ml_map = {"SAFE": "Safe", "SUSPICIOUS": "Risky", "RISKY": "Critical"}
-        ml_risk = ml_map.get(prediction_label, "Risky")
+        # Step 3: Map ML label to risk (ML classes: ['RISKY', 'SAFE', 'VULNERABLE'])
+        ml_map = {
+            "SAFE": "Safe",
+            "RISKY": "Risky",
+            "VULNERABLE": "Critical"
+        }
+        ml_risk = ml_map.get(prediction_label, "Safe")
 
-        # Step 4: If ML disagrees with rules, trust rules but note ML opinion
-        final_risk = risk_level  # rules engine is primary
+        # Step 4: Hybrid Intelligence — take the most severe classification
+        severity_order = {"Safe": 0, "Risky": 1, "Critical": 2}
+        
+        rules_severity = severity_order.get(risk_level, 0)
+        ml_severity = severity_order.get(ml_risk, 0)
+
+        if ml_severity > rules_severity:
+            final_risk = ml_risk
+            # Adjust score if ML is more certain of danger
+            if ml_risk == "Critical": score = min(score, 35)
+            elif ml_risk == "Risky": score = min(score, 65)
+        else:
+            final_risk = risk_level
 
         # Step 5: Build vulnerability list (remove internal _deduction field)
         clean_vulns = [{k: v for k, v in vuln.items() if k != "_deduction"} for vuln in vulnerabilities]
@@ -108,7 +123,8 @@ async def analyze_smart_contract(
             "vulnerabilities": clean_vulns,
             "features": engineered,
             "summary": doc["summary"],
-            "contract_hash": contract_hash
+            "contract_hash": contract_hash,
+            "contract_code": content
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {e}")

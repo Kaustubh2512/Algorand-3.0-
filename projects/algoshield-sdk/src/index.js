@@ -1,4 +1,5 @@
 const { scanContract, scanFile } = require('./scanner');
+const { watchDirectory } = require('./file-watcher');
 const { formatResult, printError } = require('./formatter');
 
 class AlgoShield {
@@ -26,8 +27,13 @@ class AlgoShield {
       return r;
     } catch (e) { if (!this.config.silent) printError(e); throw e; }
   }
+
+  watch(dirPath, options = {}) {
+    return watchDirectory(dirPath, { ...this.config, ...options });
+  }
 }
 
 module.exports = AlgoShield;
-module.exports.scan     = (code, opts) => new AlgoShield(opts).scan(code);
-module.exports.scanFile = (fp, opts)   => new AlgoShield(opts).scanFile(fp);
+module.exports.scan      = (code, opts) => new AlgoShield(opts).scan(code);
+module.exports.scanFile  = (fp, opts)   => new AlgoShield(opts).scanFile(fp);
+module.exports.watch     = (dp, opts)   => new AlgoShield(opts).watch(dp);

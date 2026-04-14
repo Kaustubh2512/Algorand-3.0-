@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navbar } from '../components/Navbar';
 import { useWallet } from '../context/WalletContext';
 import { useNavigate, Link } from 'react-router-dom';
@@ -10,8 +10,15 @@ export const Dashboard = () => {
   const { walletAddress } = useWallet();
   const navigate = useNavigate();
 
+  const [recentScans, setRecentScans] = useState<any[]>([]);
+
   useEffect(() => {
-    if (!walletAddress) {
+    if (walletAddress) {
+      fetch(`http://localhost:8000/scans/${walletAddress}`)
+        .then(res => res.json())
+        .then(data => setRecentScans(data.slice(0, 6)))
+        .catch(err => console.error(err));
+    } else {
       navigate('/');
     }
   }, [walletAddress, navigate]);
@@ -95,51 +102,34 @@ export const Dashboard = () => {
             </div>
             
             <div className="space-y-4">
-              {/* Dummy Data for Recent Scans */}
-            <div className="flex justify-between items-center p-4 bg-surface-hover rounded-lg border border-border">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full border-2 border-primary flex justify-center items-center font-mono font-bold text-primary text-sm shadow-[0_0_10px_rgba(0,255,136,0.3)]">
-                  92
-                </div>
-                <div>
-                  <h4 className="font-syne font-bold text-lg">App ID: 1234567</h4>
-                  <p className="text-xs text-gray-400 font-mono">2 mins ago</p>
-                </div>
-              </div>
-              <div>
-                <span className="px-3 py-1 bg-safe/20 text-safe border border-safe/50 rounded-full font-mono text-xs">SAFE</span>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center p-4 bg-surface-hover rounded-lg border border-border">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full border-2 border-danger flex justify-center items-center font-mono font-bold text-danger text-sm shadow-[0_0_10px_rgba(255,51,51,0.3)]">
-                  34
-                </div>
-                <div>
-                  <h4 className="font-syne font-bold text-lg">Untitled.teal</h4>
-                  <p className="text-xs text-gray-400 font-mono">1 hour ago</p>
-                </div>
-              </div>
-              <div>
-                <span className="px-3 py-1 bg-danger/20 text-danger border border-danger/50 rounded-full font-mono text-xs">CRITICAL</span>
-              </div>
-            </div>
-            
-            <div className="flex justify-between items-center p-4 bg-surface-hover rounded-lg border border-border">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full border-2 border-warning flex justify-center items-center font-mono font-bold text-warning text-sm shadow-[0_0_10px_rgba(255,170,0,0.3)]">
-                  65
-                </div>
-                <div>
-                  <h4 className="font-syne font-bold text-lg">App ID: 987654</h4>
-                  <p className="text-xs text-gray-400 font-mono">Yesterday</p>
-                </div>
-              </div>
-              <div>
-                <span className="px-3 py-1 bg-warning/20 text-warning border border-warning/50 rounded-full font-mono text-xs">RISKY</span>
-              </div>
-              </div>
+              {recentScans.length === 0 ? (
+                <p className="text-gray-400">No recent scans found.</p>
+              ) : (
+                recentScans.map((scan) => (
+                  <div key={scan.scan_id} className="flex justify-between items-center p-4 bg-surface-hover rounded-lg border border-border">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-12 h-12 rounded-full border-2 flex justify-center items-center font-mono font-bold text-sm shadow-[0_0_10px_rgba(30,30,30,0.3)]
+                        ${scan.score > 70 ? 'border-safe text-safe shadow-[0_0_10px_rgba(0,255,136,0.3)]' : 
+                          scan.score > 40 ? 'border-warning text-warning shadow-[0_0_10px_rgba(255,170,0,0.3)]' : 
+                          'border-danger text-danger shadow-[0_0_10px_rgba(255,51,51,0.3)]'}`}>
+                        {scan.score}
+                      </div>
+                      <div>
+                        <h4 className="font-syne font-bold text-lg">{scan.filename || `App ID: ${scan.app_id || 'Unknown'}`}</h4>
+                        <p className="text-xs text-gray-400 font-mono">{new Date(scan.created_at).toLocaleString()}</p>
+                      </div>
+                    </div>
+                    <div>
+                      <span className={`px-3 py-1 rounded-full font-mono text-xs border
+                        ${scan.risk_level === 'Safe' ? 'bg-safe/20 text-safe border-safe/50' : 
+                          scan.risk_level === 'Risky' ? 'bg-warning/20 text-warning border-warning/50' : 
+                          'bg-danger/20 text-danger border-danger/50'}`}>
+                        {scan.risk_level.toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </SpotlightCard>
         </motion.div>

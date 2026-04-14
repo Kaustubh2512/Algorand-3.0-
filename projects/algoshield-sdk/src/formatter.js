@@ -48,8 +48,12 @@ function formatResult(result, filePath) {
   return out.join('\n');
 }
 
+function printScanResult(result, { filePath } = {}) {
+  console.log(formatResult(result, filePath));
+}
+
 function printError(err) {
   console.error(boxen(chalk.red.bold('AlgoShield Error\n\n') + chalk.white(err.message), { padding: 1, borderColor: 'red', borderStyle: 'round' }));
 }
 
-module.exports = { formatResult, printError };
+module.exports = { formatResult, printScanResult, printError };

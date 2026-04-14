@@ -17,6 +17,28 @@ export const Scanner = () => {
   const [scanResult, setScanResult] = useState<any>(null);
   const [appId, setAppId] = useState('');
   const [dragActive, setDragActive] = useState(false);
+  const [isMinting, setIsMinting] = useState(false);
+
+  const handleMint = async () => {
+    setIsMinting(true);
+    try {
+      const response = await fetch('http://localhost:8000/mint-certificate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scan_id: scanResult.scan_id,
+          wallet_address: walletAddress
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Minting failed');
+      alert(`Certificate Minted Successfully!\nAsset ID: ${data.asset_id}\nTxn ID: ${data.txn_id}`);
+    } catch (e: any) {
+      alert(`Minting error: ${e.message}`);
+    } finally {
+      setIsMinting(false);
+    }
+  };
 
   useEffect(() => {
     if (!walletAddress) {
@@ -56,7 +78,7 @@ export const Scanner = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/scan', {
+      const response = await fetch('http://localhost:8000/analyze', {
         method: 'POST',
         body: formData,
       });
@@ -194,7 +216,13 @@ export const Scanner = () => {
 
                   <div className="mt-8">
                     {scanResult.score > 70 ? (
-                      <button className="btn-primary w-full shadow-[0_0_20px_rgba(0,255,136,0.5)]">Mint NFT Certificate</button>
+                      <button 
+                        onClick={handleMint}
+                        disabled={isMinting}
+                        className="btn-primary w-full shadow-[0_0_20px_rgba(0,255,136,0.5)] disabled:opacity-50"
+                      >
+                        {isMinting ? "Minting NFT on Algorand..." : "Mint NFT Certificate"}
+                      </button>
                     ) : (
                       <button className="w-full bg-surface border border-warning text-warning hover:bg-warning hover:text-black font-bold py-3 px-6 rounded-lg transition-all duration-300">View Suggestions & Fix</button>
                     )}
