@@ -8,8 +8,7 @@ apscheduler
 requests
 aiofiles
 py-algorand-sdk
-anthropic
 scikit-learn
 joblib
 numpy
-
+dnspython
