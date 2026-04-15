@@ -15,7 +15,7 @@ export const Certificates = () => {
 
   useEffect(() => {
     if (walletAddress) {
-      fetch(`http://localhost:8000/certificates/${walletAddress}`)
+      fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/certificates/${walletAddress}`)
         .then(res => res.json())
         .then(data => {
           setCerts(data);

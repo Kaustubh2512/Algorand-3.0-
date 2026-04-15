@@ -22,7 +22,7 @@ export const Scanner = () => {
   const handleMint = async () => {
     setIsMinting(true);
     try {
-      const response = await fetch('http://localhost:8000/mint-certificate', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/mint-certificate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -78,7 +78,7 @@ export const Scanner = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/analyze', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/analyze`, {
         method: 'POST',
         body: formData,
       });

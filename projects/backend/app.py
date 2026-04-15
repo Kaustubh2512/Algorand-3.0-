@@ -21,17 +21,31 @@ from dotenv import load_dotenv
 load_dotenv()
 
 scheduler = BackgroundScheduler()
-_sync_db = MongoClient(os.getenv("MONGODB_URL", "mongodb://localhost:27017"))[
-    os.getenv("MONGODB_DB_NAME", "algoshield")
-]
+# Set a 5-second timeout for server selection to prevent hanging on startup
+_sync_db = MongoClient(
+    os.getenv("MONGODB_URL", "mongodb://localhost:27017"),
+    serverSelectionTimeoutMS=5000
+)[os.getenv("MONGODB_DB_NAME", "algoshield")]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await create_indexes()
-    scheduler.add_job(monitor_cycle, 'interval', seconds=30, id='monitor', replace_existing=True)
-    scheduler.start()
-    print("AlgoShield AI started")
+    # Startup logic
+    try:
+        await create_indexes()
+        print("✅ MongoDB Indexes verified")
+    except Exception as e:
+        print(f"⚠️ Warning: Database initialization skipped or failed: {e}")
+
+    try:
+        scheduler.add_job(monitor_cycle, 'interval', seconds=30, id='monitor', replace_existing=True)
+        scheduler.start()
+        print("✅ Background Monitoring started")
+    except Exception as e:
+        print(f"⚠️ Warning: Scheduler failed to start: {e}")
+
+    print("🚀 AlgoShield AI Backend is ready")
     yield
+    # Shutdown logic
     scheduler.shutdown(wait=False)
 
 app = FastAPI(title="AlgoShield AI", version="2.0.0", lifespan=lifespan)

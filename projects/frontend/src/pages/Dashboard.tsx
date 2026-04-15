@@ -14,7 +14,7 @@ export const Dashboard = () => {
 
   useEffect(() => {
     if (walletAddress) {
-      fetch(`http://localhost:8000/scans/${walletAddress}`)
+      fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/scans/${walletAddress}`)
         .then(res => res.json())
         .then(data => setRecentScans(data.slice(0, 6)))
         .catch(err => console.error(err));
