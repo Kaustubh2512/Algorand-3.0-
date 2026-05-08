@@ -1,7 +1,7 @@
 # routes/certificates.py
 from fastapi import APIRouter, HTTPException
 from schemas import MintRequest
-from database import scans_collection, certificates_collection
+from database import scans_col, certificates_col
 from models import new_certificate_doc
 
 router = APIRouter()
@@ -12,7 +12,7 @@ async def mint_certificate(req: MintRequest):
     Mint an ARC-69 NFT certificate on Algorand for a scan that scored 70+.
     """
     # Get the scan from MongoDB
-    scan = await scans_collection.find_one({"_id": req.scan_id})
+    scan = await scans_col.find_one({"_id": req.scan_id})
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
 
@@ -26,7 +26,7 @@ async def mint_certificate(req: MintRequest):
         raise HTTPException(status_code=403, detail="Wallet address does not match the scan owner")
 
     # Check if certificate already minted for this scan
-    existing = await certificates_collection.find_one({"scan_id": req.scan_id})
+    existing = await certificates_col.find_one({"scan_id": req.scan_id})
     if existing:
         existing["cert_id"] = existing.pop("_id")
         existing["created_at"] = existing["created_at"].isoformat()
@@ -56,7 +56,7 @@ async def mint_certificate(req: MintRequest):
         app_id=scan.get("app_id")
     )
 
-    await certificates_collection.insert_one(doc)
+    await certificates_col.insert_one(doc)
 
     return {
         "cert_id":      doc["_id"],
@@ -71,7 +71,7 @@ async def mint_certificate(req: MintRequest):
 @router.get("/certificates/{wallet_address}")
 async def get_certificates(wallet_address: str):
     """Return all NFT certificates for a wallet address."""
-    cursor = certificates_collection.find(
+    cursor = certificates_col.find(
         {"wallet_address": wallet_address}
     ).sort("created_at", -1)
 

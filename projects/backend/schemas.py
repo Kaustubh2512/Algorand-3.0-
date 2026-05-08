@@ -11,3 +11,4 @@ class StartMonitorRequest(BaseModel):
     app_id: int
     account_address: str
     telegram_chat_id: Optional[str] = None
+    alert_email: Optional[str] = None

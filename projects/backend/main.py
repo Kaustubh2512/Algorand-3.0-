@@ -1,5 +1,5 @@
 # main.py
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from database import create_indexes
@@ -46,3 +46,30 @@ app.include_router(contracts.router,    prefix="/api", tags=["Contracts"])
 @app.get("/health")
 def health_check():
     return {"status": "AlgoShield AI is running", "version": "1.0.0"}
+
+@app.post("/analyze")
+async def analyze_contract(
+    wallet_address: str = Form(...),
+    file: UploadFile = File(None),
+    app_id: int = Form(None)
+):
+    """Direct /analyze endpoint for frontend compatibility"""
+    from scanner import scan_contract as ai_scan
+    from algorand_fetcher import fetch_contract_by_app_id
+    
+    if file:
+        contract_code = (await file.read()).decode("utf-8")
+    elif app_id:
+        try:
+            fetched = fetch_contract_by_app_id(app_id, use_mainnet=True)
+            contract_code = fetched["approval_program"]
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Could not fetch App ID {app_id}: {str(e)}")
+    else:
+        raise HTTPException(status_code=400, detail="Provide either a file upload or an app_id")
+    
+    if not contract_code or not contract_code.strip():
+        raise HTTPException(status_code=400, detail="Contract code is empty")
+    
+    result = ai_scan(contract_code)
+    return result

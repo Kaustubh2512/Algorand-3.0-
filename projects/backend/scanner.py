@@ -4,6 +4,8 @@ import json
 from utils.feature_extractor import extract_features_from_teal
 from utils.feature_engineer import engineer_features
 from ml_models.inference import predict
+from ml_models import suggester
+from ml_models import slm_inference
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -51,38 +53,8 @@ def scan_contract(contract_code: str) -> dict:
         else: # suspicious, risky, medium
             base_score = 70
 
-        # Construct vulnerabilities based on missing checks
+        # Vulnerabilities are now generated entirely by the AI/RAG engine
         vulnerabilities = []
-        
-        if extracted.get("has_rekey_check") == 0:
-            vulnerabilities.append({
-                "line": 0,
-                "vulnerability_type": "UNCHECKED_REKEY",
-                "issue": "RekeyTo field not verified to be zero address.",
-                "severity": "Critical",
-                "suggestion": "Add assert(Txn.rekey_to() == Global.zero_address())"
-            })
-            base_score -= 15
-
-        if extracted.get("has_close_check") == 0:
-            vulnerabilities.append({
-                "line": 0,
-                "vulnerability_type": "UNCHECKED_CLOSE_REMAINDER",
-                "issue": "CloseRemainderTo field not explicitly rejected.",
-                "severity": "High",
-                "suggestion": "Add assert(Txn.close_remainder_to() == Global.zero_address())"
-            })
-            base_score -= 10
-
-        if extracted.get("has_receiver_check") == 0:
-            vulnerabilities.append({
-                "line": 0,
-                "vulnerability_type": "UNCHECKED_ASSET_RECEIVER",
-                "issue": "AssetReceiver or Receiver might not be validated.",
-                "severity": "Medium",
-                "suggestion": "Ensure the receiver is validated in all transfer transactions."
-            })
-            base_score -= 5
 
         # Enforce score bounds
         final_score = max(0, min(100, base_score))
@@ -101,11 +73,40 @@ def scan_contract(contract_code: str) -> dict:
         else:
             summary += "Standard security checks appear to be present."
 
+        suggestions_list = []
+        try:
+            suggestions_list, security_score = suggester.generate_suggestions(
+                engineered, contract_code, prediction_label
+            )
+            # If the suggester computed a different score (e.g., from RAG rules), update it
+            if security_score != final_score:
+                final_score = security_score
+                if final_score <= 40:
+                    risk_level = "Critical"
+                elif final_score <= 70:
+                    risk_level = "Risky"
+                else:
+                    risk_level = "Safe"
+        except Exception as e:
+            print(f"[Suggester] Failed: {e}")
+
+        # Combine rule-based vulnerabilities with AI suggestions
+        # so the frontend displays the rich AI output immediately
+        for s in suggestions_list:
+            if "line" not in s:
+                s["line"] = s.get("lines", [1])[0] if s.get("lines") else 1
+            if "vulnerability_type" not in s:
+                s["vulnerability_type"] = s.get("id", "AI_INSIGHT")
+
         return {
-            "score": final_score,
+            "score": int(final_score),
             "risk_level": risk_level,
-            "vulnerabilities": vulnerabilities,
-            "summary": summary
+            "vulnerabilities": vulnerabilities + suggestions_list,
+            "suggestions": suggestions_list,
+            "summary": summary,
+            "slm_explanation": None,
+            "slm_suggestions": None,
+            "label": prediction_label
         }
 
     except Exception as e:

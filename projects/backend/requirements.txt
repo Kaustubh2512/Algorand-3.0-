@@ -12,3 +12,7 @@ scikit-learn
 joblib
 numpy
 dnspython
+llama-cpp-python
+chromadb
+sentence-transformers
+huggingface-hub

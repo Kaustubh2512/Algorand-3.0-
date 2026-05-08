@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Navbar } from '../components/Navbar';
 import { useWallet } from '../context/WalletContext';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Shield, Hash, ShieldAlert } from 'lucide-react';
+import { Activity, Shield, Hash, ShieldAlert, Mail } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { AlertBanner } from '../components/AlertBanner';
 import SpotlightCard from '../components/SpotlightCard';
@@ -13,9 +13,11 @@ export const Monitor = () => {
   
   const [appId, setAppId] = useState('');
   const [accountAddr, setAccountAddr] = useState('');
+  const [alertEmail, setAlertEmail] = useState('');
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [showAlertBanner, setShowAlertBanner] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!walletAddress) {
@@ -24,30 +26,66 @@ export const Monitor = () => {
   }, [walletAddress, navigate]);
 
   let timeoutId: any;
-  const startMonitoring = () => {
-    if (!appId || !accountAddr) return;
-    setIsMonitoring(true);
-    setAlerts([]);
-    
-    // Mock simulation
-    setTimeout(() => {
-      const newAlert = {
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'Reentrancy Attempt',
-        description: 'Multiple recursive calls detected from unexpected address.',
-        severity: 'Critical'
-      };
-      setAlerts(prev => [newAlert, ...prev]);
-      setShowAlertBanner(true);
+  const startMonitoring = async () => {
+    if (!appId) return;
+    try {
+      const res = await fetch('http://127.0.0.1:8000/monitor/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet_address: walletAddress,
+          app_id: parseInt(appId),
+          account_address: accountAddr || '',
+          alert_email: alertEmail || null
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Start failed');
       
-      setTimeout(() => setShowAlertBanner(false), 5000); // hide after 5 sec
-    }, 4000);
+      setJobId(data.job_id);
+      setIsMonitoring(true);
+      setAlerts([]);
+    } catch (e: any) {
+      alert(`Failed to start monitoring: ${e.message}`);
+    }
   };
 
-  const stopMonitoring = () => {
+  const stopMonitoring = async () => {
     setIsMonitoring(false);
-    clearTimeout(timeoutId);
-  }
+    if (jobId) {
+      try {
+        await fetch(`http://127.0.0.1:8000/monitor/stop/${jobId}`, {
+          method: 'POST'
+        });
+      } catch (e) {}
+    }
+    setJobId(null);
+  };
+
+  useEffect(() => {
+    let interval: any;
+    if (isMonitoring && appId) {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch(`http://127.0.0.1:8000/monitor/${appId}/alerts?wallet_address=${walletAddress}`);
+          const data = await res.json();
+          if (res.ok && data.alerts && data.alerts.length > 0) {
+            setAlerts(data.alerts.map((a: any) => ({
+              timestamp: new Date(a.timestamp).toLocaleTimeString(),
+              type: a.severity + ' Alert',
+              description: a.description,
+              severity: a.severity
+            })));
+            setShowAlertBanner(true);
+            setTimeout(() => setShowAlertBanner(false), 5000);
+          }
+        } catch (e) {
+          console.error('Poll error', e);
+        }
+      }, 10000);
+    }
+    return () => clearInterval(interval);
+  }, [isMonitoring, appId, walletAddress]);
 
   if (!walletAddress) return null;
 
@@ -112,6 +150,21 @@ export const Monitor = () => {
                       disabled={isMonitoring}
                       className="w-full bg-background border border-border rounded-lg pl-10 pr-4 py-2 text-white focus:outline-none focus:border-secondary transition-colors font-mono disabled:opacity-50"
                       placeholder="e.g. ABCDE...1234"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-mono text-gray-400 mb-1 block">Alert Email (Optional):</label>
+                  <div className="relative">
+                    <Mail className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input 
+                      type="email" 
+                      value={alertEmail}
+                      onChange={(e) => setAlertEmail(e.target.value)}
+                      disabled={isMonitoring}
+                      className="w-full bg-background border border-border rounded-lg pl-10 pr-4 py-2 text-white focus:outline-none focus:border-secondary transition-colors font-mono disabled:opacity-50"
+                      placeholder="e.g. security@team.com"
                     />
                   </div>
                 </div>

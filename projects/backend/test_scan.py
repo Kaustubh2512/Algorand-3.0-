@@ -1,6 +1,6 @@
 import requests
 
-url = "http://localhost:8000/api/scan"
+url = "http://localhost:8000/analyze"
 data = {
     "wallet_address": "TEST_WALLET",
 }
@@ -11,6 +11,7 @@ files = {
 try:
     response = requests.post(url, data=data, files=files)
     print(f"Status: {response.status_code}")
-    print(response.json())
+    import json
+    print(json.dumps(response.json(), indent=2))
 except Exception as e:
     print(f"Error: {e}")

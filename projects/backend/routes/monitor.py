@@ -1,7 +1,7 @@
 # routes/monitor.py
 from fastapi import APIRouter, HTTPException
 from schemas import StartMonitorRequest
-from database import monitor_jobs_collection, alerts_collection
+from database import monitor_jobs_col, alerts_col
 from models import new_monitor_job_doc
 
 router = APIRouter()
@@ -11,7 +11,7 @@ async def start_monitoring(req: StartMonitorRequest):
     """Register a contract address for 24/7 anomaly monitoring."""
 
     # Check if already monitoring this app for this wallet
-    existing = await monitor_jobs_collection.find_one({
+    existing = await monitor_jobs_col.find_one({
         "app_id":         req.app_id,
         "wallet_address": req.wallet_address,
         "is_active":      True
@@ -28,10 +28,11 @@ async def start_monitoring(req: StartMonitorRequest):
         wallet_address=req.wallet_address,
         app_id=req.app_id,
         account_address=req.account_address,
-        telegram_chat_id=req.telegram_chat_id
+        telegram_chat_id=req.telegram_chat_id,
+        alert_email=req.alert_email
     )
 
-    await monitor_jobs_collection.insert_one(doc)
+    await monitor_jobs_col.insert_one(doc)
 
     return {
         "job_id":  doc["_id"],
@@ -43,7 +44,7 @@ async def start_monitoring(req: StartMonitorRequest):
 @router.post("/monitor/stop/{job_id}")
 async def stop_monitoring(job_id: str):
     """Stop a monitoring job."""
-    result = await monitor_jobs_collection.update_one(
+    result = await monitor_jobs_col.update_one(
         {"_id": job_id},
         {"$set": {"is_active": False}}
     )
@@ -58,7 +59,7 @@ async def stop_monitoring(job_id: str):
 async def get_alerts(app_id: int, wallet_address: str):
     """Get the latest anomaly alerts for a monitored contract."""
 
-    job = await monitor_jobs_collection.find_one({
+    job = await monitor_jobs_col.find_one({
         "app_id":         app_id,
         "wallet_address": wallet_address
     })
@@ -66,7 +67,7 @@ async def get_alerts(app_id: int, wallet_address: str):
     if not job:
         raise HTTPException(status_code=404, detail="No monitor job found for this app_id and wallet")
 
-    cursor = alerts_collection.find(
+    cursor = alerts_col.find(
         {"monitor_job_id": job["_id"]}
     ).sort("created_at", -1).limit(20)
 
@@ -83,7 +84,7 @@ async def get_alerts(app_id: int, wallet_address: str):
         })
 
     # Mark alerts as read
-    await alerts_collection.update_many(
+    await alerts_col.update_many(
         {"monitor_job_id": job["_id"], "is_read": False},
         {"$set": {"is_read": True}}
     )
@@ -99,7 +100,7 @@ async def get_alerts(app_id: int, wallet_address: str):
 @router.get("/monitor/jobs/{wallet_address}")
 async def get_monitor_jobs(wallet_address: str):
     """Get all monitor jobs for a wallet."""
-    cursor = monitor_jobs_collection.find({"wallet_address": wallet_address})
+    cursor = monitor_jobs_col.find({"wallet_address": wallet_address})
 
     jobs = []
     async for job in cursor:

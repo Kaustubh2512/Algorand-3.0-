@@ -54,7 +54,8 @@ def new_monitor_job_doc(
     wallet_address: str,
     app_id: int,
     account_address: str,
-    telegram_chat_id: str = None
+    telegram_chat_id: str = None,
+    alert_email: str = None
 ) -> dict:
     return {
         "_id": str(uuid.uuid4()),
@@ -63,6 +64,7 @@ def new_monitor_job_doc(
         "account_address": account_address,
         "is_active": True,
         "telegram_chat_id": telegram_chat_id,
+        "alert_email": alert_email,
         "last_txn_id": None,               # ID of last processed transaction
         "created_at": datetime.utcnow()
     }

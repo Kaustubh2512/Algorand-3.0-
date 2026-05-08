@@ -18,6 +18,11 @@ export const Scanner = () => {
   const [appId, setAppId] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [isMinting, setIsMinting] = useState(false);
+  const [fileState, setFileState] = useState<File | null>(null);
+
+  const [suggestions, setSuggestions] = useState<any>(null);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const handleMint = async () => {
     setIsMinting(true);
@@ -61,6 +66,7 @@ export const Scanner = () => {
     e.stopPropagation();
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setFileState(e.dataTransfer.files[0]);
       runScan(e.dataTransfer.files[0]);
     }
   };
@@ -102,6 +108,34 @@ export const Scanner = () => {
       alert('Failed to scan contract. Please try again.');
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  const handleGetSuggestions = async () => {
+    if (!scanResult) return;
+    setLoadingSuggestions(true);
+    setShowSuggestions(true);
+    try {
+      // Use scan_id if available, otherwise re-send the file
+      const formData = new FormData();
+      if (scanResult.scan_id) {
+        formData.append('scan_id', scanResult.scan_id);
+        formData.append('wallet_address', walletAddress || 'anonymous');
+      } else if (fileState) {
+        formData.append('file', fileState);
+        formData.append('wallet_address', walletAddress || 'anonymous');
+      }
+      const res = await fetch('http://127.0.0.1:8000/suggest', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Suggestions failed');
+      setSuggestions(data);
+    } catch (err: any) {
+      console.error('Suggestions error:', err.message);
+    } finally {
+      setLoadingSuggestions(false);
     }
   };
 
@@ -148,7 +182,12 @@ export const Scanner = () => {
                     <p className="text-gray-400 text-sm mb-4">Or click to browse from your computer.</p>
                     <label className="btn-secondary cursor-pointer">
                       Browse Files
-                      <input type="file" className="hidden" accept=".teal,.py,.txt" onChange={(e) => e.target.files && runScan(e.target.files[0])} />
+                      <input type="file" className="hidden" accept=".teal,.py,.txt" onChange={(e) => {
+                        if (e.target.files) {
+                          setFileState(e.target.files[0]);
+                          runScan(e.target.files[0]);
+                        }
+                      }} />
                     </label>
                   </div>
 
@@ -224,7 +263,7 @@ export const Scanner = () => {
                         {isMinting ? "Minting NFT on Algorand..." : "Mint NFT Certificate"}
                       </button>
                     ) : (
-                      <button className="w-full bg-surface border border-warning text-warning hover:bg-warning hover:text-black font-bold py-3 px-6 rounded-lg transition-all duration-300">View Suggestions & Fix</button>
+                      <button onClick={handleGetSuggestions} className="w-full bg-surface border border-warning text-warning hover:bg-warning hover:text-black font-bold py-3 px-6 rounded-lg transition-all duration-300">View Suggestions & Fix</button>
                     )}
                   </div>
                 </SpotlightCard>
@@ -241,6 +280,43 @@ export const Scanner = () => {
                       <VulnerabilityCard key={i} {...v} />
                     ))}
                   </motion.div>
+                  {showSuggestions && (
+                    <div style={{ marginTop: '1.5rem' }}>
+                      <h3 style={{ color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: 1, marginBottom: '0.75rem' }}>
+                        AI Fix Suggestions
+                      </h3>
+                      {loadingSuggestions && (
+                        <div style={{ color: '#64748b', padding: '1rem', textAlign: 'center' }}>
+                          ⟳ Analyzing with AI model...
+                        </div>
+                      )}
+                      {suggestions && !loadingSuggestions && (
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>AI Security Score:</span>
+                            <span style={{ color: suggestions.security_score >= 70 ? '#00ff88' : suggestions.security_score >= 40 ? '#ffaa00' : '#ff3333', fontFamily: 'monospace', fontWeight: 700, fontSize: '1.1rem' }}>
+                              {suggestions.security_score}/100
+                            </span>
+                            <span style={{ color: '#64748b', fontSize: '0.85rem', marginLeft: 'auto' }}>{suggestions.summary}</span>
+                          </div>
+                          {(suggestions.suggestions || []).map((s: any, i: number) => (
+                            <div key={i} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderLeft: `3px solid ${s.severity === 'Critical' ? '#ff3333' : s.severity === 'High' ? '#ff6b35' : s.severity === 'Medium' ? '#ffaa00' : '#60a5fa'}`, borderRadius: 8, padding: '1rem', marginBottom: '0.75rem' }}>
+                              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                <span style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, padding: '0.15rem 0.6rem', fontSize: '0.75rem', color: '#94a3b8', fontFamily: 'monospace' }}>
+                                  Line {s.line}
+                                </span>
+                                <span style={{ fontWeight: 600, color: '#cbd5e1', fontSize: '0.9rem' }}>{s.vulnerability}</span>
+                              </div>
+                              <p style={{ color: '#94a3b8', fontSize: '0.85rem', margin: '0 0 0.5rem' }}>{s.description}</p>
+                              <div style={{ background: 'rgba(0,255,136,0.05)', border: '1px solid rgba(0,255,136,0.15)', borderRadius: 6, padding: '0.5rem 0.75rem' }}>
+                                <span style={{ color: '#00ff88', fontSize: '0.8rem', fontFamily: 'monospace' }}>💡 Fix: {s.fix}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </SpotlightCard>
               </div>
 

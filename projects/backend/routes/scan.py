@@ -1,7 +1,7 @@
 # routes/scan.py
 import hashlib
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Header, Depends
-from database import scans_collection
+from database import scans_col
 from models import new_scan_doc
 
 router = APIRouter()
@@ -13,8 +13,12 @@ async def verify_api_key(x_api_key: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid API key")
     return x_api_key
 
-@router.post("/scan")
-async def scan_contract(
+@router.get("/health")
+async def health():
+    return {"status": "AlgoShield AI is running", "version": "1.0.0"}
+
+@router.post("/analyze")
+async def analyze_contract(
     wallet_address: str = Form(...),
     file: UploadFile = File(None),
     app_id: int = Form(None),
@@ -60,27 +64,34 @@ async def scan_contract(
 
     # Step 3: Save result to MongoDB
     contract_hash = hashlib.sha256(contract_code.encode()).hexdigest()
+    
+    # Merge manual vulnerabilities and AI suggestions for the frontend
+    all_vulns = scan_result.get("suggestions", [])
+    if not all_vulns and scan_result.get("vulnerabilities"):
+        all_vulns = scan_result.get("vulnerabilities")
 
     doc = new_scan_doc(
         wallet_address=wallet_address,
         contract_code=contract_code,
         contract_hash=contract_hash,
-        score=scan_result["score"],
+        score=int(scan_result["score"]),
         risk_level=scan_result["risk_level"],
-        vulnerabilities=scan_result.get("vulnerabilities", []),
+        vulnerabilities=all_vulns,
         summary=scan_result.get("summary", ""),
         app_id=app_id,
         contract_filename=contract_filename
     )
 
-    await scans_collection.insert_one(doc)
+    await scans_col.insert_one(doc)
 
     return {
-        "scan_id":        doc["_id"],
-        "score":          doc["score"],
-        "risk_level":     doc["risk_level"],
+        "scan_id":         doc["_id"],
+        "score":           int(doc["score"]),
+        "risk_level":      doc["risk_level"],
         "vulnerabilities": doc["vulnerabilities"],
-        "summary":        doc["summary"],
+        "summary":         doc["summary"],
+        "slm_explanation": scan_result.get("slm_explanation"),
+        "slm_suggestions": scan_result.get("slm_suggestions"),
         "contract_code":  contract_code,
         "contract_hash":  contract_hash
     }
@@ -89,7 +100,7 @@ async def scan_contract(
 @router.get("/scans/{wallet_address}")
 async def get_scan_history(wallet_address: str):
     """Return last 10 scans for this wallet address."""
-    cursor = scans_collection.find(
+    cursor = scans_col.find(
         {"wallet_address": wallet_address},
         # Exclude the full contract_code from the list view (keep it small)
         {"contract_code": 0}
@@ -112,10 +123,61 @@ async def get_scan_history(wallet_address: str):
 @router.get("/scan/{scan_id}")
 async def get_scan(scan_id: str):
     """Get a single scan result by its ID."""
-    doc = await scans_collection.find_one({"_id": scan_id})
+    doc = await scans_col.find_one({"_id": scan_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Scan not found")
 
     doc["scan_id"] = doc.pop("_id")
     doc["created_at"] = doc["created_at"].isoformat()
     return doc
+
+
+@router.post("/analyze-with-slm")
+async def analyze_with_slm(teal_code: str = Form(...)):
+    """
+    Use the Phi-3-mini SLM to analyze TEAL contract code.
+    Returns detailed natural language explanation and suggestions.
+    """
+    try:
+        from ml_models import slm_inference
+        explanation = slm_inference.summarize_contract(teal_code[:3000])
+        suggestions = slm_inference.suggest_improvements(teal_code[:3000], "assessed")
+        return {"explanation": explanation, "suggestions": suggestions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"SLM analysis failed: {str(e)}")
+
+@router.post("/suggest")
+async def get_suggestions(
+    file: UploadFile = File(None),
+    scan_id: str = Form(None),
+    wallet_address: str = Form(default="anonymous")
+):
+    """
+    Get AI-powered line-by-line fix suggestions for a TEAL contract.
+    Accepts either a fresh file upload OR a scan_id to load from MongoDB.
+    """
+    # Get contract code
+    if file:
+        try:
+            contract_code = (await file.read()).decode('utf-8')
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Could not read file: {e}")
+    elif scan_id:
+        # Load from MongoDB using existing scan
+        from database import scans_col
+        scan = await scans_col.find_one({"_id": scan_id})
+        if not scan:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        contract_code = scan.get("contract_code", "")
+    else:
+        raise HTTPException(status_code=400, detail="Provide either a file or scan_id")
+
+    if not contract_code.strip():
+        raise HTTPException(status_code=400, detail="Contract code is empty")
+
+    try:
+        from ml_models.suggester import get_suggestions as get_suggs
+        result = get_suggs(contract_code)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Suggestion engine failed: {e}")

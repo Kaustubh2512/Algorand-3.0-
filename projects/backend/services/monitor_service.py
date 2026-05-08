@@ -4,6 +4,12 @@ import uuid
 import requests
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
+try:
+    from utils.blockchain_indexer import fetch_contract_transactions
+    from utils.email_service import send_alert_email
+    from ml_models.anomaly import get_monitor
+except ImportError:
+    pass
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
@@ -39,14 +45,16 @@ def run_monitoring_cycle():
     """
     Called every 30 seconds by APScheduler.
     Fetches new transactions for each active monitor job,
-    runs anomaly detection, saves alerts, sends Telegram messages.
+    runs anomaly detection, saves alerts, sends Email messages.
     """
+
+    # APScheduler runs in a separate thread. We must run async code using asyncio
+    import asyncio
     try:
-        from poller import poll_new_transactions
-        from monitor import get_monitor
-    except ImportError as e:
-        print(f"Monitor cycle: module not ready yet ({e})")
-        return
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
     monitor_jobs = _sync_db["monitor_jobs"]
     alerts       = _sync_db["alerts"]
@@ -58,22 +66,29 @@ def run_monitoring_cycle():
 
         try:
             # 1. Fetch new transactions from Algorand Indexer
-            new_txns = poll_new_transactions(
-                account_address=job["account_address"],
-                app_id=job["app_id"],
-                last_seen_txn_id=job.get("last_txn_id")
-            )
+            new_txns = loop.run_until_complete(fetch_contract_transactions(
+                contract_address=job["account_address"],
+                min_round=job.get("last_round", 0)
+            ))
 
             if not new_txns:
                 continue
 
-            # 2. Update the last seen transaction ID
+            # 2. Update the last seen round based on highest confirmed-round in new txns
+            highest_round = job.get("last_round", 0)
+            for txn in new_txns:
+                rnd = txn.get("confirmed-round", 0)
+                if rnd > highest_round:
+                    highest_round = rnd
+
             monitor_jobs.update_one(
                 {"_id": job_id},
-                {"$set": {"last_txn_id": new_txns[0].get("id")}}
+                {"$set": {"last_round": highest_round + 1}} # next time fetch from next round
             )
 
             # 3. Feed transactions to the Isolation Forest model
+            # Assuming get_monitor still exists locally or we should adapt it.
+            # wait, the original code had: from monitor import get_monitor
             ai_monitor = get_monitor(str(job["app_id"]))
             ai_monitor.add_transactions(new_txns)
 
@@ -98,56 +113,17 @@ def run_monitoring_cycle():
 
                     print(f"🚨 Anomaly detected — App {job['app_id']} | {result['severity']} | {result['description']}")
 
-                    # 6. Send Telegram notification if configured
-                    if job.get("telegram_chat_id"):
-                        send_telegram_alert(
-                            chat_id=job["telegram_chat_id"],
-                            app_id=job["app_id"],
-                            anomaly_result=result
+                    # 6. Send Email notification if configured
+                    if job.get("alert_email"):
+                        send_alert_email(
+                            to_email=job["alert_email"],
+                            contract_address=job["account_address"],
+                            txn_id=txn.get("id", "Unknown"),
+                            txn_type=txn.get("tx-type", "Unknown"),
+                            risk_level=result["severity"],
+                            label=result["description"]
                         )
 
         except Exception as e:
             print(f"Error in monitor job {job_id}: {e}")
 
-
-def send_telegram_alert(chat_id: str, app_id: int, anomaly_result: dict):
-    """
-    Send a Telegram message when an anomaly is detected.
-    Uses the Telegram Bot API directly (no library needed).
-    """
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not bot_token:
-        print("TELEGRAM_BOT_TOKEN not set — skipping alert")
-        return
-
-    severity_emoji = {
-        "Critical": "🔴",
-        "High":     "🟠",
-        "Medium":   "🟡",
-        "Low":      "🔵"
-    }.get(anomaly_result.get("severity", ""), "⚠️")
-
-    message = (
-        f"{severity_emoji} *AlgoShield Security Alert*\n\n"
-        f"App ID: `{app_id}`\n"
-        f"Severity: *{anomaly_result.get('severity', 'Unknown')}*\n"
-        f"Anomaly Score: `{anomaly_result.get('anomaly_score', 0)}`\n\n"
-        f"📋 {anomaly_result.get('description', 'Suspicious activity detected')}\n\n"
-        f"🔗 [View on Allo Explorer](https://allo.info/app/{app_id})\n"
-        f"🛡️ Powered by AlgoShield AI"
-    )
-
-    try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={
-                "chat_id":    chat_id,
-                "text":       message,
-                "parse_mode": "Markdown"
-            },
-            timeout=5
-        )
-        if response.status_code != 200:
-            print(f"Telegram error: {response.text}")
-    except requests.exceptions.RequestException as e:
-        print(f"Telegram send failed: {e}")

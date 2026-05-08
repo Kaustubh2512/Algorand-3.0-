@@ -9,7 +9,7 @@ from typing import Optional
 
 from utils.feature_extractor import extract_features_from_teal
 from utils.feature_engineer import engineer_features
-from utils.rules_engine import analyze_lines, calculate_score
+from ml_models.suggester import generate_suggestions
 # Use ml_models instead of models to maintain directory fix
 from ml_models.inference import predict
 from database import scans_col, certificates_col, monitor_jobs_col, alerts_col, create_indexes
@@ -17,13 +17,16 @@ from database import scans_col, certificates_col, monitor_jobs_col, alerts_col, 
 # ── APScheduler for monitoring
 from apscheduler.schedulers.background import BackgroundScheduler
 from pymongo import MongoClient
+import certifi
 from dotenv import load_dotenv
 load_dotenv()
 
+ca = certifi.where()
 scheduler = BackgroundScheduler()
-# Set a 5-second timeout for server selection to prevent hanging on startup
 _sync_db = MongoClient(
-    os.getenv("MONGODB_URL", "mongodb://localhost:27017"),
+    os.getenv("MONGODB_URL"), 
+    tlsCAFile=ca, 
+    tlsAllowInvalidCertificates=True,
     serverSelectionTimeoutMS=5000
 )[os.getenv("MONGODB_DB_NAME", "algoshield")]
 
@@ -37,7 +40,8 @@ async def lifespan(app: FastAPI):
         print(f"⚠️ Warning: Database initialization skipped or failed: {e}")
 
     try:
-        scheduler.add_job(monitor_cycle, 'interval', seconds=30, id='monitor', replace_existing=True)
+        from services.monitor_service import run_monitoring_cycle
+        scheduler.add_job(run_monitoring_cycle, 'interval', seconds=30, id='monitor', replace_existing=True)
         scheduler.start()
         print("✅ Background Monitoring started")
     except Exception as e:
@@ -58,6 +62,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from routes.scan import router as scan_router
+app.include_router(scan_router)
+
+
 # ──────────────────────────────────────────────
 # ROUTE 1 — Scan (expanded from original /analyze)
 # ──────────────────────────────────────────────
@@ -74,41 +82,18 @@ async def analyze_smart_contract(
         raise HTTPException(status_code=400, detail=f"Failed to read file: {e}")
 
     try:
-        # Step 1: Original ML pipeline
-        extracted  = extract_features_from_teal(content)
-        engineered = engineer_features(extracted)
-        prediction_num, prediction_label = predict(engineered)
-
-        # Step 2: Rules engine for line-by-line vulnerabilities
-        vulnerabilities = analyze_lines(content)
-        score, risk_level = calculate_score(vulnerabilities)
-
-        # Step 3: Map ML label to risk (ML classes: ['RISKY', 'SAFE', 'VULNERABLE'])
-        ml_map = {
-            "SAFE": "Safe",
-            "RISKY": "Risky",
-            "VULNERABLE": "Critical"
-        }
-        ml_risk = ml_map.get(prediction_label, "Safe")
-
-        # Step 4: Hybrid Intelligence — take the most severe classification
-        severity_order = {"Safe": 0, "Risky": 1, "Critical": 2}
+        # Step 1: Use the comprehensive scanner logic
+        from scanner import scan_contract
+        result = scan_contract(content)
         
-        rules_severity = severity_order.get(risk_level, 0)
-        ml_severity = severity_order.get(ml_risk, 0)
-
-        if ml_severity > rules_severity:
-            final_risk = ml_risk
-            # Adjust score if ML is more certain of danger
-            if ml_risk == "Critical": score = min(score, 35)
-            elif ml_risk == "Risky": score = min(score, 65)
-        else:
-            final_risk = risk_level
-
-        # Step 5: Build vulnerability list (remove internal _deduction field)
-        clean_vulns = [{k: v for k, v in vuln.items() if k != "_deduction"} for vuln in vulnerabilities]
-
-        # Step 6: Save to MongoDB
+        # Step 2: Map scanner results to match frontend expectations
+        # The frontend expects 'score', 'risk_level', 'vulnerabilities', 'contract_code'
+        vulnerabilities = result.get("suggestions", [])
+        score = result.get("score", 50)
+        risk_level = result.get("risk_level", "Risky")
+        prediction_label = result.get("ml_label", "SUSPICIOUS") # Fallback from summary if needed
+        
+        # Step 3: Save to MongoDB for persistent history
         scan_id = str(uuid.uuid4())
         contract_hash = hashlib.sha256(content.encode()).hexdigest()
 
@@ -118,30 +103,30 @@ async def analyze_smart_contract(
             "filename": file.filename,
             "contract_code": content,
             "contract_hash": contract_hash,
-            "score": score,
-            "risk_level": final_risk,
-            "ml_label": prediction_label,
-            "vulnerabilities": clean_vulns,
-            "features": engineered,
-            "summary": f"AlgoShield ML classified as {prediction_label}. Rules engine found {len(vulnerabilities)} issue(s). Score: {score}/100.",
+            "score": int(score),
+            "risk_level": risk_level,
+            "ml_label": result.get("label", "SUSPICIOUS"), # Correct key from Predictor
+            "vulnerabilities": vulnerabilities,
+            "summary": result.get("summary", ""),
             "created_at": datetime.utcnow()
         }
         await scans_col.insert_one(doc)
 
+        # Step 4: Final response
         return {
             "scan_id": scan_id,
-            "prediction": prediction_num,
-            "label": prediction_label,
-            "score": score,
-            "risk_level": final_risk,
-            "vulnerabilities": clean_vulns,
-            "features": engineered,
-            "summary": doc["summary"],
+            "score": int(score),
+            "risk_level": risk_level,
+            "vulnerabilities": vulnerabilities,
+            "contract_code": content,
             "contract_hash": contract_hash,
-            "contract_code": content
+            "summary": result.get("summary", ""),
+            "label": result.get("label", "SUSPICIOUS")
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 # ──────────────────────────────────────────────
 # ROUTE 2 — Scan history for a wallet
@@ -256,6 +241,7 @@ class MonitorRequest(BaseModel):
     app_id: int
     account_address: str
     telegram_chat_id: Optional[str] = None
+    alert_email: Optional[str] = None
 
 @app.post("/monitor/start")
 async def start_monitoring(req: MonitorRequest):
@@ -274,11 +260,22 @@ async def start_monitoring(req: MonitorRequest):
         "app_id": req.app_id,
         "account_address": req.account_address,
         "telegram_chat_id": req.telegram_chat_id,
+        "alert_email": req.alert_email,
         "is_active": True,
         "last_txn_id": None,
         "created_at": datetime.utcnow()
     })
     return {"job_id": job_id, "message": "Monitoring started"}
+
+@app.post("/monitor/stop/{job_id}")
+async def stop_monitoring(job_id: str):
+    result = await monitor_jobs_col.update_one(
+        {"_id": job_id},
+        {"$set": {"is_active": False}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Monitor job not found")
+    return {"message": "Monitoring stopped", "job_id": job_id}
 
 # ──────────────────────────────────────────────
 # ROUTE 7 — Get alerts
@@ -353,4 +350,4 @@ def _send_telegram(chat_id, app_id, result):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
